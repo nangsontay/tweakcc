@@ -1,6 +1,7 @@
 import { Settings, InputPatternHighlighter, Toolset, Theme } from './types';
 
 export const DEFAULT_SETTINGS: Settings = {
+  installCapabilityDiscovery: false,
   themes: [
     {
       name: 'Dark mode',

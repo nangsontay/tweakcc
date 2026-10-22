@@ -565,6 +565,13 @@ const PATCH_DEFINITIONS = [
       'The native installer keeps the binary tweakcc wrote instead of re-downloading it',
   },
   {
+    id: 'capability-discovery',
+    name: 'On-demand capability discovery',
+    group: PatchGroup.FEATURES,
+    description:
+      'Install opt-in System One discovery and native /config controls (qualified split-native builds only)',
+  },
+  {
     id: 'webfetch-user-agent',
     name: 'WebFetch User-Agent',
     group: PatchGroup.MISC_CONFIGURABLE,
@@ -1047,6 +1054,11 @@ export const buildPatchImplementations = (
         writeWebFetchUserAgent(c, config.settings.misc!.webFetchUserAgent!),
       condition: !!config.settings.misc?.webFetchUserAgent,
     },
+    'capability-discovery': {
+      // This feature requires the complete split-module graph.
+      fn: () => null,
+      condition: config.settings.installCapabilityDiscovery === true,
+    },
   };
 
   return patchImplementations;
@@ -1119,6 +1131,45 @@ export const applyUpdateGuardToGraph = (
 // =============================================================================
 // Main Apply Function
 // =============================================================================
+
+export const applyCapabilityDiscoveryToGraph = async (
+  config: TweakccConfig,
+  graphSources: Map<string, string>,
+  patchFilter?: readonly string[] | null
+): Promise<PatchResult> => {
+  const definition = PATCH_DEFINITIONS.find(
+    def => def.id === 'capability-discovery'
+  )!;
+  const base = { ...definition, applied: false };
+  if (
+    config.settings.installCapabilityDiscovery !== true ||
+    (patchFilter && !patchFilter.includes(definition.id))
+  )
+    return { ...base, skipped: true };
+  // Avoid loading the native AST parser for ordinary patch applications.
+  const { writeCapabilityDiscoveryModules } = await import(
+    './capabilityDiscovery'
+  );
+  const staged = writeCapabilityDiscoveryModules(graphSources);
+  if (!staged)
+    return {
+      ...base,
+      failed: true,
+      details:
+        'Unsupported or incomplete native capability-discovery graph; no discovery changes applied.',
+    };
+  let changed = 0;
+  for (const [name, source] of staged) {
+    if (source === graphSources.get(name)) continue;
+    graphSources.set(name, source);
+    changed++;
+  }
+  return {
+    ...base,
+    applied: changed > 0,
+    details: changed ? `Updated ${changed} module(s).` : 'Already installed.',
+  };
+};
 
 export const applyCustomization = async (
   config: TweakccConfig,
@@ -1247,7 +1298,11 @@ export const applyCustomization = async (
     const { results: graphResults } = applyPatchImplementationsToGraph(
       graphSources,
       patchImplementations,
-      PATCH_DEFINITIONS.filter(def => def.id !== 'prevent-unsupported-updates'),
+      PATCH_DEFINITIONS.filter(
+        def =>
+          def.id !== 'prevent-unsupported-updates' &&
+          def.id !== 'capability-discovery'
+      ),
       patchFilter,
       {
         entryModule: nativeGraph.modules[nativeGraph.entryPointIndex]?.name,
@@ -1264,6 +1319,10 @@ export const applyCustomization = async (
       patchFilter
     );
     if (guardResult) allResults.push(guardResult);
+
+    allResults.push(
+      await applyCapabilityDiscoveryToGraph(config, graphSources, patchFilter)
+    );
 
     const replacements = changedModuleSources(nativeGraph, graphSources);
     for (const [name, contents] of replacements)

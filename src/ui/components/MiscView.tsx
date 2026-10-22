@@ -864,6 +864,19 @@ export function MiscView({ onSubmit }: MiscViewProps) {
         },
       },
       {
+        id: 'installCapabilityDiscovery',
+        title: 'On-demand capability discovery',
+        description:
+          'Install the opt-in System One discovery and native /config controls. Requires a qualified split-native Claude Code build; no effect on unqualified or non-native installs.',
+        getValue: () => settings.installCapabilityDiscovery === true,
+        toggle: () => {
+          updateSettings(settings => {
+            settings.installCapabilityDiscovery =
+              settings.installCapabilityDiscovery !== true;
+          });
+        },
+      },
+      {
         id: 'webFetchUserAgent',
         title: 'WebFetch User-Agent',
         description:

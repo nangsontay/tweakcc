@@ -184,6 +184,92 @@ npx tweakcc@latest --apply --config-url https://gist.githubusercontent.com/bl-ue
 
 Your local config will **not** be overwritten; the remote config will be copied into your `config.json` under `remoteConfig.settings`.
 
+## On-demand capability discovery (experimental)
+
+Set `settings.installCapabilityDiscovery` to `true` in tweakcc's `config.json`,
+then apply your customizations and restart Claude Code. Installation is opt-in
+and currently qualified for **split-native Claude Code 2.1.300 and 2.1.304**.
+Other versions/layouts fail the discovery patch without installing partial
+filtering. The patch ID is `capability-discovery`; as with every patch,
+`--apply --patches` restores the backup before applying the listed IDs, so include
+all customizations you want to retain.
+
+In Claude Code's `/config`, use **Capability discovery** to choose **Normal
+(Off)** or **System One discovery (On)**, and **Capability discovery settings (JSON)** to
+edit JSON. Save validates and persists native user settings; Cancel discards the
+edit. Runtime configuration belongs in Claude Code's user `settings.json`
+(`$CLAUDE_CONFIG_DIR` or `~/.claude`), separately from tweakcc's installation flag:
+
+```json
+{
+  "capabilityDiscovery": {
+    "enabled": false,
+    "endpoint": "http://127.0.0.1:4141/custom/systemone",
+    "model": "my-system-one-model",
+    "headers": {},
+    "threshold": 0.25,
+    "timeoutMs": 10000,
+    "maxRequestBytes": 32768,
+    "maxResponseBytes": 262144,
+    "maxQuestionsPerRequest": 32
+  }
+}
+```
+
+There is no default endpoint or model. On requires both; Off can retain an
+incomplete draft. The endpoint is a complete HTTP(S) URL accepting the System One
+`{model,state,questions}` Noul contract, including custom gateway paths. Ordinary
+chat/completions APIs do not satisfy this contract. HTTP is unencrypted; HTTPS is
+appropriate for remote services. Redirects and URL credentials are refused.
+
+For authentication, bind a header to an environment variable, for example
+`"headers":{"Authorization":{"env":"SYSTEM_ONE_API_KEY","prefix":"Bearer "}}`.
+Export the variable before starting Claude Code, or set it yourself in Claude
+Code's existing user `env` object. That object is plaintext and inherited by
+subprocesses; it is not a secret store. The discovery editor stores the variable
+name and prefix, never the resolved value. Restart Claude Code after changing its
+launch environment. For a Jev service, an operator-supplied example is endpoint
+`https://api.typesafe.ai/v1/systemone`, model `jev-1.13.0`, with a bearer binding to
+`TYPESAFE_API_KEY`; these are examples, not built-in defaults or a model-quality
+recommendation.
+
+When On, Claude uses native ToolSearch to discover optional skills and tools.
+Only an explicit natural-language discovery call sends the query and compact
+capability names/descriptions to the configured decision service. It does not
+send recent transcript, skill bodies, tool schemas, or server instructions.
+Endpoint and header bindings are read from native **user settings**, so project
+settings cannot redirect these requests. Service retention depends on your
+operator; this feature makes no retention guarantee.
+
+Selected skills receive native listings and load through Skill; selected tools
+retain native references, permission checks, and associated instructions. Direct
+`select:<tool>,skill:<skill>` selection uses native/local lookup with zero
+decision calls. Upfront core tools, mandatory rules, explicit user skills and
+running hooks retain native behavior. Deferred schemas may still be present in
+HTTP `tools[]`; this feature reduces optional prompt catalogs, not all wire bytes.
+
+Results honor the natural-search `max_results` budget and report
+`moreAvailable`; search again to reach additional candidates. Direct selection
+retains native behavior. Failed/invalid decisions use bounded native/local
+search and disclose the fallback. Byte/count limits apply to deterministic
+batches under one deadline, with no automatic retry. The 0.25 threshold is
+provisional and must be calibrated for your service/model.
+
+Off aborts owned decisions, restores native context/search on subsequent requests,
+and retains custom values without binary reapply. After a cold resume following
+compaction, native 2.1.300 may require ToolSearch to rediscover selected skills;
+2.1.304 retains their listings. Both retain native discovered-tool references.
+It cannot erase context already
+sent. Unsupported native tool-search modes, restricted tool pools, pinned upfront
+MCP tools, or unknown context shapes restore native behavior with a pause notice.
+Claude Code's own model/gateway must support native deferred tools. To remove the
+feature, disable the tweakcc installation flag and reapply, or use the ordinary
+backup restore flow.
+
+Qualification uses disposable executables and scripted localhost peers. Real
+decision relevance, provider billing/latency, and unknown gateways remain
+unqualified; no paid service is needed to install or run the local checks.
+
 ## Guard automatic updates
 
 The **Prevent updates to unsupported versions** toggle in Misc settings enables

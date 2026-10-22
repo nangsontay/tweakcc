@@ -209,6 +209,8 @@ export function isPatchEnabledByConfig(
       return isShimmerCustomized(misc?.shimmer);
     case 'prevent-unsupported-updates':
       return !!misc?.preventUpdateToUnsupportedVersions;
+    case 'capability-discovery':
+      return config.settings.installCapabilityDiscovery === true;
     case 'keep-patched-binary':
       return nativeInstall && (misc?.keepPatchedBinaryOnUpdate ?? true);
     case 'webfetch-user-agent':

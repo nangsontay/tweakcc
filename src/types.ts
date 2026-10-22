@@ -179,6 +179,7 @@ export interface SubagentModelsConfig {
 }
 
 export interface Settings {
+  installCapabilityDiscovery: boolean;
   themes: Theme[];
   thinkingVerbs: ThinkingVerbsConfig;
   thinkingStyle: ThinkingStyleConfig;

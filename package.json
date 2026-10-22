@@ -63,7 +63,6 @@
     "prettier": "^3.6.2",
     "tsdown": "^0.18.4",
     "tsx": "^4.20.3",
-    "typescript": "^5.9.2",
     "typescript-eslint": "^8.39.0",
     "vitest": "^3.2.4"
   },
@@ -84,6 +83,7 @@
     "react": "^19.1.1",
     "string-width": "^8.1.0",
     "terminal-link": "^3.0.0",
+    "typescript": "^5.9.2",
     "which": "^6.0.0"
   },
   "engines": {

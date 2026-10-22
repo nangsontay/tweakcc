@@ -198,6 +198,9 @@ const normalizeConfig = (config: TweakccConfig): void => {
     DEFAULT_SETTINGS
   ) as Settings;
 
+  config.settings.installCapabilityDiscovery =
+    config.settings.installCapabilityDiscovery === true;
+
   // Merge each inputPatternHighlighter item against the default template
   // This ensures each highlighter has all required properties even if some were deleted
   if (config.settings.inputPatternHighlighters) {

@@ -135,6 +135,22 @@ describe('config.ts', () => {
   });
 
   describe('readConfigFile', () => {
+    it.each([undefined, null, false, true, 'true', 1])(
+      'normalizes discovery installation %s with strict explicit opt-in',
+      async value => {
+        vi.spyOn(fs, 'readFile').mockResolvedValue(
+          JSON.stringify({
+            settings: {
+              ...DEFAULT_SETTINGS,
+              installCapabilityDiscovery: value,
+            },
+          })
+        );
+        expect(
+          (await readConfigFile()).settings.installCapabilityDiscovery
+        ).toBe(value === true);
+      }
+    );
     it.each([undefined, false, true])(
       'normalizes the update guard setting %s without enabling it implicitly',
       async value => {

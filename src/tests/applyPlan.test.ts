@@ -20,6 +20,19 @@ function configWithDefaults(
 }
 
 describe('applyPlan', () => {
+  it('installs discovery only on explicit opt-in, independently of native runtime mode', () => {
+    const config = configWithDefaults();
+    const id = 'capability-discovery';
+    expect(isPatchEnabledByConfig(id, config, '2.1.304')).toBe(false);
+    config.settings.installCapabilityDiscovery = true;
+    expect(getPlannedPatches(config, '2.1.304', [id])).toEqual([
+      expect.objectContaining({ id, defaultOn: false }),
+    ]);
+    expect(
+      getPlannedPatches(config, '2.1.304', ['themes']).map(p => p.id)
+    ).not.toContain(id);
+    expect(isPatchEnabledByConfig(id, config, '2.1.304', false)).toBe(true);
+  });
   it('plans keep-patched-binary only for native installs', () => {
     const config = configWithDefaults();
     const id = 'keep-patched-binary';
