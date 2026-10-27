@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Keep tweakcc-patched native binaries when Claude Code re-verifies an installed version, and add `--install-hook` to re-apply customizations in the background after Claude Code replaces the binary
 - Add tmux graphics passthrough patch (#1023) - @gergesh
 - Add opt-in on-demand skill and tool discovery with native Claude Code /config controls, bounded System One requests, and atomic split-native patching
+- Fix edited system prompts embedded inside larger JavaScript strings being applied without the enclosing string's escaping
+- Fix `/context` counting undiscovered skills when capability discovery is enabled
+- Remind main agents and subagents to discover optional skills and tools when capability discovery is active
 
 ## [v4.4.0](https://github.com/Piebald-AI/tweakcc/releases/tag/v4.4.0) - 2026-10-10
 

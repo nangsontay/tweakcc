@@ -248,6 +248,16 @@ decision calls. Upfront core tools, mandatory rules, explicit user skills and
 running hooks retain native behavior. Deferred schemas may still be present in
 HTTP `tools[]`; this feature reduces optional prompt catalogs, not all wire bytes.
 
+With discovery On, `/context` counts selected skills instead of the full local
+skill inventory. A fresh session has no optional skill descriptions until
+discovery selects them. Off and native compatibility fallbacks retain the native
+skill estimate.
+
+Main-agent and subagent requests include a short reminder to use ToolSearch before
+specialized work. It appears once at the start of the current context, including
+after compaction, without accumulating on later turns. Off, unavailable ToolSearch,
+and tool-free helper requests omit the reminder.
+
 Results honor the natural-search `max_results` budget and report
 `moreAvailable`; search again to reach additional candidates. Direct selection
 retains native behavior. Failed/invalid decisions use bounded native/local

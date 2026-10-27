@@ -47,15 +47,18 @@ describe('SessionStart hook', () => {
     });
   });
 
-  it('keeps the permissions of settings.json, owner-only for a new file', async () => {
-    await fs.chmod(settingsFile(), 0o640);
-    await installSessionStartHook();
-    expect((await fs.stat(settingsFile())).mode & 0o777).toBe(0o640);
+  it.skipIf(process.platform === 'win32')(
+    'keeps the permissions of settings.json, owner-only for a new file',
+    async () => {
+      await fs.chmod(settingsFile(), 0o640);
+      await installSessionStartHook();
+      expect((await fs.stat(settingsFile())).mode & 0o777).toBe(0o640);
 
-    await fs.rm(settingsFile());
-    await installSessionStartHook();
-    expect((await fs.stat(settingsFile())).mode & 0o777).toBe(0o600);
-  });
+      await fs.rm(settingsFile());
+      await installSessionStartHook();
+      expect((await fs.stat(settingsFile())).mode & 0o777).toBe(0o600);
+    }
+  );
 
   it('replaces settings.json atomically and leaves no temporary file', async () => {
     const before = (await fs.stat(settingsFile())).ino;

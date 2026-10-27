@@ -513,6 +513,83 @@ export function writeCapabilityDiscoveryContextModules(
       text: `${aggregate.name!.text}$tccOriginal`,
     },
   ];
+  const skillEstimate = one(
+    functions.filter(node => node.getText(ast).includes('skillTokens:0')),
+    'native context skill estimator'
+  );
+  const inventory: ts.AwaitExpression[] = [];
+  function findInventory(node: ts.Node) {
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isObjectBindingPattern(node.name) &&
+      node.name.elements.some(
+        element => element.propertyName?.getText(ast) === 'included'
+      ) &&
+      node.initializer &&
+      ts.isAwaitExpression(node.initializer)
+    )
+      inventory.push(node.initializer);
+    ts.forEachChild(node, findInventory);
+  }
+  findInventory(skillEstimate);
+  const inventoryRead = one(inventory, 'native context skill inventory');
+  const contextOwner = one(
+    functions.filter(
+      node =>
+        node !== skillEstimate &&
+        node.getText(ast).includes(skillEstimate.name!.text + '(')
+    ),
+    'native context estimator caller'
+  );
+  const estimateCalls: ts.CallExpression[] = [];
+  function findEstimate(node: ts.Node) {
+    if (
+      ts.isCallExpression(node) &&
+      node.expression.getText(ast) === skillEstimate.name!.text
+    )
+      estimateCalls.push(node);
+    ts.forEachChild(node, findEstimate);
+  }
+  findEstimate(contextOwner);
+  const estimateCall = one(estimateCalls, 'native context estimator call');
+  assert.equal(
+    estimateCall.arguments.length,
+    skillEstimate.parameters.length,
+    'native estimator arguments'
+  );
+  const estimateContext = estimateCall.arguments[5]
+    .getText(ast)
+    .match(/^([$\w]+)\?\.getMcp\?\.\(\)\.commands\?\?\[\]$/)?.[1];
+  assert(estimateContext, 'native context diagnostics context');
+  const diagnosticSession = one(
+    contextOwner
+      .body!.statements.filter(ts.isVariableStatement)
+      .flatMap(statement => [...statement.declarationList.declarations])
+      .flatMap(declaration =>
+        ts.isObjectBindingPattern(declaration.name)
+          ? [...declaration.name.elements]
+          : []
+      )
+      .filter(element => element.propertyName?.getText(ast) === 'session'),
+    'native diagnostic session'
+  ).name.getText(ast);
+  edits.push(
+    {
+      start: skillEstimate.parameters.end,
+      end: skillEstimate.parameters.end,
+      text: ',$tccContext',
+    },
+    {
+      start: inventoryRead.getStart(ast),
+      end: inventoryRead.end,
+      text: `$tccCapabilityDiscovery().contextSkills($tccContext,${inventoryRead.getText(ast)})`,
+    },
+    {
+      start: estimateCall.arguments.end,
+      end: estimateCall.arguments.end,
+      text: `,${estimateContext}===void 0?void 0:{...${estimateContext},session:${estimateContext}.session??${diagnosticSession},messages:${contextOwner.parameters[0].name.getText(ast)},options:{...${estimateContext}.options,tools:${estimateCall.arguments[0].getText(ast)},mainLoopModel:${estimateCall.arguments[4].getText(ast)}}}`,
+    }
+  );
   const discoveryDescription =
     'Find optional skills and tools needed for the task. Use a natural-language query; several capabilities may match. Invoke returned skills with Skill and call returned tools through their native references. Select exact names with select:<tool>,skill:<skill>[,...]. Search again when more matches are available. When discovery is paused, native tool search and the native skill listing remain available.';
   for (const name of ['description', 'prompt']) {
@@ -821,7 +898,14 @@ function $tccCapabilityDiscovery(){return $tccCapabilityDiscoveryInstance??=(()=
     async beforeWire(messages,tools,flags){
       if(${helperQuery}(flags.querySource))return messages;
       const state=wireStates.get(${latch}(flags))?.get(flags.agentId??null);
-      if(!state?.filtered||operations.wire(flags.model,tools,flags))return [...messages,...operations.notice(state,[]).map(attachment=>${makeAttachment}(attachment))];
+      const active=operations.wire(flags.model,tools,flags);
+      if(state?.active&&active){
+        const content="Optional skills and tools are loaded on demand. Before specialized work, search ToolSearch with a short description of your task. An empty listing does not mean no capabilities are installed. Matched tools come back in the ToolSearch result; matched skills are listed in a follow-up system-reminder even when the ToolSearch result reports no matches — treat that listing as the result and invoke its skills through Skill by name. Use select:<name> (skill:<name> for skills) to load known capabilities directly, and rephrase the query to surface additional matches.";
+        const start=messages.findLastIndex(message=>message.type==="system"&&message.subtype==="compact_boundary")+1;
+        if(messages.slice(start).some(message=>message.type==="attachment"&&message.attachment?.type==="critical_system_reminder"&&message.attachment.content===content))return messages;
+        return [...messages.slice(0,start),${makeAttachment}({type:"critical_system_reminder",content}),...messages.slice(start)];
+      }
+      if(!state?.filtered||active)return [...messages,...operations.notice(state,[]).map(attachment=>${makeAttachment}(attachment))];
       state.failed=true;state.active=false;operations.reset(state.context);
       const restored=[];
       if(state.context)restored.push(...await ${skillAdvertiser}({...state.context,messages},messages));
@@ -832,6 +916,7 @@ function $tccCapabilityDiscovery(){return $tccCapabilityDiscoveryInstance??=(()=
       state.filtered=false;return [...messages,...restored.map(attachment=>${makeAttachment}(attachment))];
     },
     skills(context,skills){const state=operations.state(context);if(!state?.active)return skills;state.filtered=true;state.context=context;state.skills=new Map(skills.map(skill=>[skill.name,skill]));return skills.filter(skill=>state.selectedSkills.has(skill.name))},
+    contextSkills(context,inventory){const state=context&&operations.state({...context,getMcp:void 0});return state?.active?{...inventory,included:inventory.included.filter(skill=>state.selectedSkills.has(skill.name))}:inventory},
     project(context,type,raw,produce){
       const state=operations.state(context);if(!state?.active)return raw;
       state.filtered=true;

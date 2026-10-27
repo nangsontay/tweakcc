@@ -119,6 +119,27 @@ function load(version: string) {
     .filter(ts.isFunctionDeclaration)
     .find(node => node.name?.text === '$tccCreateNativeToolSearch')!
     .getText(patchedAst);
+  const contextEstimator = patchedAst.statements
+    .filter(ts.isFunctionDeclaration)
+    .find(node => node.getText(patchedAst).includes('skillTokens:0'))!
+    .getText(patchedAst);
+  const contextCaller = patchedAst.statements
+    .filter(ts.isFunctionDeclaration)
+    .find(node =>
+      node.getText(patchedAst).includes('skillFrontmatter.reduce')
+    )!;
+  new vm.Script(contextCaller.getText(patchedAst));
+  let contextArgument = '';
+  function findContextArgument(node: ts.Node) {
+    if (
+      ts.isCallExpression(node) &&
+      node.expression.getText(patchedAst) ===
+        (version === '2.1.304' ? 'mir' : 'Plr')
+    )
+      contextArgument = node.arguments.at(-1)!.getText(patchedAst);
+    ts.forEachChild(node, findContextArgument);
+  }
+  findContextArgument(contextCaller);
   return {
     sources,
     settings,
@@ -128,6 +149,8 @@ function load(version: string) {
     nativeHistory,
     nativeCompatibility,
     nativeFactory,
+    contextEstimator,
+    contextArgument,
   };
 }
 
@@ -154,7 +177,12 @@ interface ProofMessage {
   subtype?: string;
   compactMetadata?: { preCompactDiscoveredTools: string[] };
   message?: { content: unknown };
-  attachment?: { type: string; names?: string[]; addedNames?: string[] };
+  attachment?: {
+    type: string;
+    names?: string[];
+    addedNames?: string[];
+    content?: string;
+  };
 }
 interface ProofResult {
   data: {
@@ -187,6 +215,7 @@ interface ProofContext {
   mcpClients?: () => { name: string; capabilities: { resources: object } }[];
 }
 interface ProofState {
+  context: ProofContext;
   selectedSkills: Set<string>;
   selectedTools: Set<string>;
   active: boolean;
@@ -464,6 +493,178 @@ describe.runIf(fixtureRoot !== undefined)(
   () => {
     for (const version of versions)
       describe(version, () => {
+        it.each([undefined, 'child-agent'])(
+          'keeps one discovery reminder at the start of agent %s context',
+          async agentId => {
+            const h = harness(version);
+            const context = { ...h.context, agentId };
+            h.runtime.skills(context, h.skills);
+            const flags = {
+              agentId,
+              stickyBetas: context.stickyBetas,
+              model: 'fixture',
+            };
+            const first = await h.runtime.beforeWire(h.history, h.tools, flags);
+            expect(first[0].attachment).toMatchObject({
+              type: 'critical_system_reminder',
+              content: expect.stringContaining(
+                'Before specialized work, search ToolSearch'
+              ),
+            });
+            expect(first[0].attachment?.content).toContain('An empty listing');
+            expect(first[0].attachment?.content).toContain('through Skill');
+            expect(first.slice(1)).toEqual(h.history);
+            expect(h.history).toHaveLength(1);
+            const next = [...first, { type: 'user', uuid: 'next-user' }];
+            expect(await h.runtime.beforeWire(next, h.tools, flags)).toBe(next);
+            const replay = await h.runtime.beforeWire(
+              h.history,
+              h.tools,
+              flags
+            );
+            expect(replay[0].attachment).toEqual(first[0].attachment);
+            expect(replay).toHaveLength(first.length);
+            expect(h.send).not.toHaveBeenCalled();
+          }
+        );
+
+        it('restores the reminder after compaction and deduplicates cold resumes', async () => {
+          const h = harness(version);
+          const flags = {
+            stickyBetas: h.context.stickyBetas,
+            model: 'fixture',
+          };
+          const first = await h.runtime.beforeWire(h.history, h.tools, flags);
+          const compacted = [
+            ...first,
+            { type: 'system', subtype: 'compact_boundary', uuid: 'compact' },
+            { type: 'user', uuid: 'summary' },
+          ];
+          const restored = await h.runtime.beforeWire(
+            compacted,
+            h.tools,
+            flags
+          );
+          expect(restored[3].attachment).toEqual(first[0].attachment);
+          expect(restored[4].uuid).toBe('summary');
+          expect(await h.runtime.beforeWire(restored, h.tools, flags)).toBe(
+            restored
+          );
+          const resumed = harness(version);
+          expect(
+            await resumed.runtime.beforeWire(first, resumed.tools, {
+              stickyBetas: resumed.context.stickyBetas,
+              model: 'fixture',
+            })
+          ).toBe(first);
+          expect(h.send).not.toHaveBeenCalled();
+          expect(resumed.send).not.toHaveBeenCalled();
+        });
+
+        it('leaves discovery Off and tool-free helper requests without a reminder', async () => {
+          const h = harness(version);
+          const flags = {
+            stickyBetas: h.context.stickyBetas,
+            model: 'fixture',
+          };
+          const guard = fixture(version).tail.match(
+            /if\(([$\w]+)\(flags.querySource\)\)/
+          )![1];
+          h.sandbox[guard] = () => true;
+          expect(await h.runtime.beforeWire(h.history, h.tools, flags)).toBe(
+            h.history
+          );
+          h.sandbox[guard] = () => false;
+          h.changeMode(false);
+          h.runtime.state(h.context);
+          expect(await h.runtime.beforeWire(h.history, h.tools, flags)).toEqual(
+            h.history
+          );
+          expect(h.send).not.toHaveBeenCalled();
+        });
+
+        it('counts only visible skills in /context and preserves native fallback', async () => {
+          const h = harness(version);
+          const modern = version === '2.1.304';
+          const diagnosticContext = vm.runInNewContext(
+            `(${fixture(version).contextArgument})`,
+            {
+              S: h.context.session,
+              D: { ...h.context, session: undefined },
+              e: h.history,
+              s: h.tools,
+              n: 'fixture',
+            }
+          ) as ProofContext;
+          expect(diagnosticContext.session).toBe(h.context.session);
+          Object.assign(h.sandbox, {
+            [modern ? 'lvr' : 'Bfr']: async () => ({
+              merged: h.skills,
+              included: h.skills,
+            }),
+            [modern ? 'qan' : 'Ndn']: () => ({ name: 'Skill' }),
+            [modern ? 'ML' : 'SD']: async () => 20,
+            [modern ? 'avr' : 'Ufr']: (skills: ProofSkill[]) =>
+              new Map(skills.map(skill => [skill.name, 50])),
+            [modern ? 'Do' : 'vo']: (skill: ProofSkill) => skill.name,
+            [modern ? 'xae' : 'Tre']: () => 'user',
+            [modern ? 'U' : 'H']: (error: unknown) => error,
+            l: (error: unknown) => {
+              throw error;
+            },
+          });
+          const estimator = vm.runInContext(
+            `(${fixture(version).contextEstimator})`,
+            h.sandbox
+          ) as (...args: unknown[]) => Promise<{
+            skillInfo: {
+              totalSkills: number;
+              includedSkills: number;
+              skillFrontmatter: { name: string; tokens: number }[];
+            };
+          }>;
+          const estimate = async (
+            context: ProofContext | undefined = diagnosticContext
+          ) =>
+            (
+              await estimator(
+                h.tools,
+                undefined,
+                undefined,
+                'fixture',
+                'fixture',
+                [],
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                ...(modern ? [false] : []),
+                context
+              )
+            ).skillInfo;
+          const liveState = h.runtime.state(h.context);
+          expect(await estimate()).toEqual({
+            totalSkills: 2,
+            includedSkills: 0,
+            skillFrontmatter: [],
+          });
+          expect(liveState.context).toBe(h.context);
+          await h.call('select:skill:alpha');
+          expect((await estimate()).skillFrontmatter).toEqual([
+            { name: 'alpha', source: 'user', tokens: 50 },
+          ]);
+          expect(h.send).not.toHaveBeenCalled();
+          h.changeMode(false);
+          expect((await estimate()).includedSkills).toBe(2);
+          h.changeMode(true);
+          h.tools.splice(
+            h.tools.findIndex(tool => tool.name === 'ToolSearch'),
+            1
+          );
+          expect((await estimate()).includedSkills).toBe(2);
+          expect((await estimator(h.tools)).skillInfo.includedSkills).toBe(2);
+        });
         it.runIf(version === '2.1.304')(
           'bounds native already-loaded alias notices, instructions and follow-up results',
           async () => {
@@ -693,6 +894,11 @@ describe.runIf(fixtureRoot !== undefined)(
               expect.objectContaining({
                 type: 'critical_system_reminder',
                 content: expect.stringContaining('restored'),
+              })
+            );
+            expect(attachments).not.toContainEqual(
+              expect.objectContaining({
+                content: expect.stringContaining('Before specialized work'),
               })
             );
             expect(h.runtime.state(h.context).active).toBe(false);

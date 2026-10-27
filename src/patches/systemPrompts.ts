@@ -1,4 +1,5 @@
 import chalk from 'chalk';
+import ts from 'typescript';
 import { debug, stringifyRegex, verbose } from '../utils';
 import { showDiff, PatchResult, PatchGroup } from './index';
 import {
@@ -123,6 +124,27 @@ const escapeUnescapedChar = (str: string, char: string): string => {
   return result;
 };
 
+const enclosingLiteralDelimiter = (
+  source: ts.SourceFile,
+  start: number,
+  end: number
+): string | undefined => {
+  let delimiter: string | undefined;
+  const visit = (node: ts.Node): void => {
+    if (node.pos > start || node.end < end) return;
+    if (
+      ts.isStringLiteral(node) ||
+      ts.isNoSubstitutionTemplateLiteral(node) ||
+      ts.isTemplateExpression(node)
+    ) {
+      delimiter = source.text[node.getStart(source)];
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return delimiter;
+};
+
 /**
  * Apply system prompt customizations to cli.js content
  * @param input - The current content of cli.js, or every JavaScript module of
@@ -240,6 +262,7 @@ export const applySystemPrompts = async (
       // can differ between occurrences even though the surrounding prompt
       // text is identical.
       const replacements: string[][] = found.map(() => []);
+      const sourceFiles = new Map<number, ts.SourceFile>();
       let abortDetails: string | undefined;
 
       // reconstructContentFromPieces produced the .md body in the first place,
@@ -286,9 +309,23 @@ export const applySystemPrompts = async (
           continue;
         }
 
-        // Check the delimiter character before this match to determine string type
+        // A prompt can be a substring of a larger literal, including a quoted
+        // string nested inside a template interpolation.
         const mIndex = m.index!;
-        const delimiter = mIndex > 0 ? content[mIndex - 1] : '';
+        let sourceFile = sourceFiles.get(f);
+        if (!sourceFile) {
+          sourceFile = ts.createSourceFile(
+            'module.js',
+            content,
+            ts.ScriptTarget.Latest,
+            false,
+            ts.ScriptKind.JS
+          );
+          sourceFiles.set(f, sourceFile);
+        }
+        const delimiter =
+          enclosingLiteralDelimiter(sourceFile, mIndex, mIndex + m[0].length) ??
+          (mIndex > 0 ? content[mIndex - 1] : '');
 
         // For backtick-delimited prompts, `${...}` is live interpolation. A name
         // the bundle never defines there (a typo in an edit, or a stale .md

@@ -1199,6 +1199,63 @@ describe('systemPrompts.ts', () => {
         pieces,
       });
 
+    it.each(['`', '"', "'"])(
+      'escapes an edited prompt inside a larger %s literal',
+      async delimiter => {
+        const pieces = ['Use \\`delegate\\` safely.'];
+        const content =
+          'Use `delegate` with "care" when it\'s safe.\nNext line.';
+        setupMocks(edited(pieces, content));
+        const source = `return ${delimiter}Prefix: ${pieces[0]} Suffix${delimiter};`;
+
+        const result = await applySystemPrompts(source, '2.1.295', false);
+
+        expect(new Function(result.newContent)()).toBe(
+          `Prefix: ${content} Suffix`
+        );
+        expect(result.results[0].applied).toBe(true);
+      }
+    );
+
+    it('uses the enclosing literal when prompt prose follows an apostrophe', async () => {
+      setupMocks(edited(['Original text'], 'Use `delegate` safely.'));
+
+      const result = await applySystemPrompts(
+        "return `Reviewers'Original text`;",
+        '2.1.295',
+        false
+      );
+
+      expect(new Function(result.newContent)()).toBe(
+        "Reviewers'Use `delegate` safely."
+      );
+    });
+
+    it('guards stale interpolations inside a larger template literal', async () => {
+      setupMocks(edited(['Original text'], 'Updated ${STALE_NAME}'));
+      const source = 'return `Prefix: Original text Suffix`;';
+
+      const result = await applySystemPrompts(source, '2.1.295', false);
+
+      expect(result.newContent).toBe(source);
+      expect(result.results[0].details).toBe(
+        'undefined identifier: STALE_NAME'
+      );
+    });
+
+    it('keeps interpolation text inert inside a quoted string nested in a template', async () => {
+      setupMocks(
+        edited(['Original text'], 'Updated ${INERT_NAME} with "care"')
+      );
+      const source = 'return `Outer ${"Prefix: Original text Suffix"}`;';
+
+      const result = await applySystemPrompts(source, '2.1.295', false);
+
+      expect(new Function(result.newContent)()).toBe(
+        'Outer Prefix: Updated ${INERT_NAME} with "care" Suffix'
+      );
+    });
+
     it('patches a prompt in every module that repeats it', async () => {
       const pieces = [
         'If you must sleep, keep the duration short to avoid blocking the user.',
